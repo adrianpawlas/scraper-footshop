@@ -9,3 +9,4 @@ tenacity>=8.0.0
 aiohttp>=3.9.0
 asyncio>=3.4.3
 sentencepiece>=0.1.99
+protobuf>=4.21.0
