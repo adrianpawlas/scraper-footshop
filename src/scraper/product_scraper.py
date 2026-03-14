@@ -99,7 +99,7 @@ class ProductScraper:
         try:
             await self.page.goto(url, wait_until="domcontentloaded", timeout=60000)
             
-            await self.page.wait_for_timeout(5000)
+            await self.page.wait_for_timeout(2000)
             
             product_id = self._extract_product_id(url)
             

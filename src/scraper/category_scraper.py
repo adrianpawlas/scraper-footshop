@@ -36,7 +36,7 @@ class CategoryScraper:
     async def get_product_urls_from_page(self, url: str) -> List[str]:
         await self.page.goto(url, wait_until="domcontentloaded")
         
-        await self.page.wait_for_timeout(5000)
+        await self.page.wait_for_timeout(2000)
         
         products = await self.page.query_selector_all('a[href*="/mens-shoes/"], a[href*="/womens-shoes/"]')
         urls = []
@@ -53,7 +53,7 @@ class CategoryScraper:
 
     async def get_total_pages(self, category_url: str) -> int:
         await self.page.goto(category_url, wait_until="domcontentloaded")
-        await self.page.wait_for_timeout(3000)
+        await self.page.wait_for_timeout(1500)
         
         try:
             pagination = await self.page.query_selector('.pagination')
@@ -84,7 +84,7 @@ class CategoryScraper:
     async def _check_page_product_count(self, url: str) -> int:
         try:
             await self.page.goto(url, wait_until="domcontentloaded")
-            await self.page.wait_for_timeout(3000)
+            await self.page.wait_for_timeout(1500)
             products = await self.page.query_selector_all('a[href*="/mens-shoes/"], a[href*="/womens-shoes/"]')
             seen = set()
             for p in products:
