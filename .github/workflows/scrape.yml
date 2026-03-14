@@ -1,0 +1,43 @@
+name: Footshop Scraper
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Daily at midnight
+  workflow_dispatch:  # Manual trigger
+  push:
+    branches:
+      - main
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          playwright install chromium --with-deps
+      
+      - name: Run scraper
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python main.py
+      
+      - name: Check results
+        run: |
+          echo "Scraping completed!"
+          if [ -f product_urls.json ]; then
+            echo "Product URLs collected: $(cat product_urls.json | python -c 'import json,sys; print(len(json.load(sys.stdin)))')"
+          fi
+          if [ -f scraped_products.json ]; then
+            echo "Products scraped: $(cat scraped_products.json | python -c 'import json,sys; print(len(json.load(sys.stdin)))')"
+          fi
