@@ -1,0 +1,1 @@
+# Footshop Scraper Package

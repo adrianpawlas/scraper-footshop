@@ -1,0 +1,10 @@
+playwright>=1.40.0
+supabase>=2.0.0
+torch>=2.0.0
+transformers>=4.36.0
+pillow>=10.0.0
+numpy>=1.24.0
+python-dotenv>=1.0.0
+tenacity>=8.0.0
+aiohttp>=3.9.0
+asyncio>=3.4.3
