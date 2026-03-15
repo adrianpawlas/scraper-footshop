@@ -28,7 +28,7 @@ class SupabaseClient:
                 "metadata": product_data.get("metadata"),
                 "size": product_data.get("sizes"),
                 "second_hand": False,
-                "country": product_data.get("country", "Belgium"),
+                "country": product_data.get("country"),
                 "additional_images": product_data.get("additional_images"),
                 "image_embedding": product_data.get("image_embedding"),
                 "info_embedding": product_data.get("info_embedding"),

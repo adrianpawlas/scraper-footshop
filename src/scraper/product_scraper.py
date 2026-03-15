@@ -154,7 +154,7 @@ class ProductScraper:
                 "metadata": json.dumps(metadata),
                 "sizes": ", ".join(sizes) if sizes else None,
                 "source": "scraper-footshop",
-                "country": "Belgium"
+                "country": None
             }
             
             return product_data
@@ -164,12 +164,26 @@ class ProductScraper:
             return None
 
     async def _get_title(self) -> str:
-        try:
-            title_elem = await self.page.query_selector('h1')
-            if title_elem:
-                return await title_elem.inner_text()
-        except Exception:
-            pass
+        selectors = [
+            'h1',
+            '.product-name h1',
+            '.product-title h1',
+            '.pdp-title h1',
+            '.product-detail-name',
+            'h1.product-title',
+            '.product-info h1',
+            '[itemprop="name"]',
+        ]
+        
+        for selector in selectors:
+            try:
+                title_elem = await self.page.query_selector(selector)
+                if title_elem:
+                    text = await title_elem.inner_text()
+                    if text and text.strip():
+                        return text.strip()
+            except Exception:
+                continue
         return "Unknown"
 
     async def _get_brand(self) -> str:
