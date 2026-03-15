@@ -99,7 +99,7 @@ class ProductScraper:
         try:
             await self.page.goto(url, wait_until="domcontentloaded", timeout=60000)
             
-            await self.page.wait_for_timeout(2000)
+            await self.page.wait_for_timeout(3000)
             
             product_id = self._extract_product_id(url)
             
@@ -206,22 +206,35 @@ class ProductScraper:
         return ""
 
     async def _get_main_image(self) -> str:
-        try:
-            img_elem = await self.page.query_selector('[itemprop="image"]')
-            if img_elem:
-                src = await img_elem.get_attribute('src')
-                if src:
-                    return src
-                data_src = await img_elem.get_attribute('data-src')
-                if data_src:
-                    return data_src
-            img_elem = await self.page.query_selector('.product-image img')
-            if img_elem:
-                src = await img_elem.get_attribute('src')
-                if src:
-                    return src
-        except Exception:
-            pass
+        selectors = [
+            '[itemprop="image"]',
+            '.product-image img',
+            '.product-image-primary img',
+            '.productMainImage img',
+            '.pdp-image img',
+            '.gallery-image img',
+            'img.product-img',
+            '.product-detail-image img',
+            'figure.product-image img',
+            '.product-hero-image img',
+        ]
+        
+        for selector in selectors:
+            try:
+                img_elem = await self.page.query_selector(selector)
+                if img_elem:
+                    src = await img_elem.get_attribute('src')
+                    if src and '://' in src:
+                        return src
+                    data_src = await img_elem.get_attribute('data-src')
+                    if data_src and '://' in data_src:
+                        return data_src
+                    data_lazy = await img_elem.get_attribute('data-lazy')
+                    if data_lazy and '://' in data_lazy:
+                        return data_lazy
+            except Exception:
+                continue
+        
         return ""
 
     async def _get_additional_images(self) -> str:
