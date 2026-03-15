@@ -143,7 +143,7 @@ class ProductScraper:
                 "id": product_id,
                 "product_url": url,
                 "title": title,
-                "brand": brand,
+                "brand": "Footshop",
                 "description": description,
                 "image_url": image_url,
                 "additional_images": additional_images,
