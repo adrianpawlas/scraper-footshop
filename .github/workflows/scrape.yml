@@ -2,7 +2,7 @@ name: Footshop Scraper
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # Daily at midnight
+    - cron: '0 8 * * *'  # Daily at midnight
   workflow_dispatch:  # Manual trigger
   push:
     branches:
