@@ -1,12 +1,11 @@
 import asyncio
 import logging
 import json
+import time
 from datetime import datetime
-from typing import List
-import aiohttp
-from concurrent.futures import ThreadPoolExecutor
+from typing import List, Dict, Set, Optional
 
-from config import SUPABASE_URL, SUPABASE_KEY, CATEGORIES, SOURCE, BRAND, SECOND_HAND, EMBEDDING_MODEL
+from config import SUPABASE_URL, SUPABASE_KEY, CATEGORIES, SOURCE, EMBEDDING_MODEL
 from src.scraper.category_scraper import CategoryScraper
 from src.scraper.product_scraper import ProductScraper
 from src.embeddings.embedding_generator import SigLIPEmbeddingGenerator
@@ -19,14 +18,23 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class ParallelScraper:
-    def __init__(self, max_concurrent: int = 5):
+class SmartScraper:
+    def __init__(self, max_concurrent: int = 5, batch_size: int = 50):
         self.category_scraper = None
         self.product_scrapers: List[ProductScraper] = []
         self.embedding_generator = None
         self.supabase_client = None
         self.max_concurrent = max_concurrent
+        self.batch_size = batch_size
         
+        self.stats = {
+            'new': 0,
+            'updated': 0,
+            'unchanged': 0,
+            'deleted': 0,
+            'errors': 0
+        }
+
     async def initialize(self):
         logger.info("Initializing scraper components...")
         
@@ -85,8 +93,43 @@ class ParallelScraper:
         
         return products
 
-    def generate_embeddings_batch(self, products: List[dict]) -> List[dict]:
-        logger.info(f"Generating embeddings for {len(products)} products...")
+    def get_existing_products(self, products: List[dict]) -> Dict[str, dict]:
+        logger.info("Fetching existing products from database...")
+        existing = {}
+        
+        product_urls = [p.get('product_url') for p in products if p.get('product_url')]
+        
+        for url in product_urls:
+            product = self.supabase_client.get_product_by_url(url)
+            if product:
+                existing[url] = product
+        
+        logger.info(f"Found {len(existing)} existing products")
+        return existing
+
+    def has_product_changed(self, scraped: dict, existing: dict) -> bool:
+        fields_to_check = ['title', 'price', 'sale', 'image_url', 'additional_images', 'description', 'sizes']
+        
+        for field in fields_to_check:
+            scraped_val = scraped.get(field)
+            existing_val = existing.get(field)
+            
+            if str(scraped_val) != str(existing_val):
+                return True
+        
+        return False
+
+    def should_regenerate_embeddings(self, scraped: dict, existing: dict) -> bool:
+        if not existing:
+            return True
+        
+        scraped_image = scraped.get('image_url', '')
+        existing_image = existing.get('image_url', '')
+        
+        return scraped_image != existing_image
+
+    def generate_embeddings_staggered(self, products: List[dict]) -> List[dict]:
+        logger.info(f"Generating embeddings for {len(products)} products (with 0.5s stagger)...")
         
         for i, product in enumerate(products):
             info_emb = self.embedding_generator.generate_info_embedding(product)
@@ -98,30 +141,66 @@ class ParallelScraper:
             
             if i % 50 == 0:
                 logger.info(f"Embedding progress: {i+1}/{len(products)}")
+            
+            time.sleep(0.5)
         
         logger.info(f"Completed embeddings for {len(products)} products")
         return products
 
     def insert_products_batch(self, products: List[dict]) -> int:
-        logger.info(f"Inserting {len(products)} products into database...")
-        success_count = 0
+        logger.info(f"Inserting {len(products)} products into database (batch size: {self.batch_size})...")
         
-        for i, product in enumerate(products):
-            if self.supabase_client.insert_product(product):
-                success_count += 1
-            if (i + 1) % 100 == 0:
-                logger.info(f"Inserted {i+1}/{len(products)} products")
+        total_inserted = 0
+        for i in range(0, len(products), self.batch_size):
+            batch = products[i:i + self.batch_size]
+            
+            success = self.supabase_client.upsert_products_batch(batch, self.stats)
+            total_inserted += success if success else 0
+            
+            logger.info(f"Inserted batch {i//self.batch_size + 1}/{(len(products) + self.batch_size - 1) // self.batch_size}")
         
-        logger.info(f"Successfully inserted {success_count}/{len(products)} products")
-        return success_count
+        return total_inserted
+
+    def cleanup_stale_products(self, current_urls: Set[str]) -> int:
+        logger.info("Cleaning up stale products...")
+        
+        all_products = self.supabase_client.get_all_products_by_source()
+        
+        stale_count = 0
+        for product in all_products:
+            product_url = product.get('product_url')
+            
+            if product_url not in current_urls:
+                stale_count += 1
+                self.supabase_client.mark_product_seen(product_url)
+        
+        two_run_stale = self.supabase_client.get_products_not_seen_in_runs(2)
+        
+        for product in two_run_stale:
+            self.supabase_client.delete_product(product['id'])
+            stale_count += 1
+        
+        logger.info(f"Deleted {stale_count} stale products")
+        return stale_count
+
+    def print_summary(self):
+        logger.info("=" * 60)
+        logger.info("SCRAPER RUN SUMMARY")
+        logger.info("=" * 60)
+        logger.info(f"  New products added:    {self.stats['new']}")
+        logger.info(f"  Products updated:     {self.stats['updated']}")
+        logger.info(f"  Products unchanged:   {self.stats['unchanged']}")
+        logger.info(f"  Stale products deleted: {self.stats['deleted']}")
+        logger.info(f"  Errors:               {self.stats['errors']}")
+        logger.info("=" * 60)
 
     async def run(self):
         try:
             await self.initialize()
             
-            logger.info("=" * 50)
-            logger.info("Starting Footshop scraper (OPTIMIZED)")
-            logger.info("=" * 50)
+            logger.info("=" * 60)
+            logger.info("Starting Footshop Scraper (SMART MODE)")
+            logger.info("=" * 60)
             
             logger.info(f"Categories to scrape: {CATEGORIES}")
             
@@ -155,34 +234,66 @@ class ParallelScraper:
                 
                 logger.info(f"Found {len(all_product_urls)} products in {category_url}")
             
-            unique_urls = list(set(all_product_urls))
+            unique_urls = set(all_product_urls)
             logger.info(f"Total unique product URLs: {len(unique_urls)}")
             
             with open('product_urls.json', 'w') as f:
-                json.dump(unique_urls, f)
+                json.dump(list(unique_urls), f)
             
             logger.info("STEP 2: Scraping product details (parallel)...")
-            products = await self.scrape_products_parallel(unique_urls)
+            products = await self.scrape_products_parallel(list(unique_urls))
             logger.info(f"Successfully scraped {len(products)} products")
             
             with open('scraped_products.json', 'w') as f:
                 json.dump(products, f, indent=2)
             
-            logger.info("STEP 3: Generating embeddings...")
-            products = self.generate_embeddings_batch(products)
+            logger.info("STEP 3: Smart embedding generation...")
+            existing_products = self.get_existing_products(products)
+            
+            products_to_embed = []
+            for product in products:
+                url = product.get('product_url')
+                existing = existing_products.get(url)
+                
+                if not existing:
+                    products_to_embed.append(product)
+                elif self.should_regenerate_embeddings(product, existing):
+                    products_to_embed.append(product)
+                else:
+                    product['info_embedding'] = existing.get('info_embedding')
+                    product['image_embedding'] = existing.get('image_embedding')
+                    self.stats['unchanged'] += 1
+            
+            logger.info(f"Products needing new embeddings: {len(products_to_embed)}")
+            logger.info(f"Products with unchanged embeddings: {self.stats['unchanged']}")
+            
+            products_to_embed = self.generate_embeddings_staggered(products_to_embed)
+            
+            for product in products_to_embed:
+                url = product.get('product_url')
+                existing = existing_products.get(url)
+                if existing:
+                    self.stats['updated'] += 1
+                else:
+                    self.stats['new'] += 1
+            
+            for p in products_to_embed:
+                for i, product in enumerate(products):
+                    if product.get('product_url') == p.get('product_url'):
+                        products[i] = p
+                        break
             
             with open('products_with_embeddings.json', 'w') as f:
                 json.dump(products, f, indent=2)
             
-            logger.info("STEP 4: Inserting products into Supabase...")
-            success_count = self.insert_products_batch(products)
+            logger.info("STEP 4: Inserting products into Supabase (batch)...")
+            self.insert_products_batch(products)
             
-            logger.info("=" * 50)
-            logger.info(f"Scraping completed successfully!")
-            logger.info(f"Total products scraped: {len(products)}")
-            logger.info(f"Products with embeddings: {len(products)}")
-            logger.info(f"Products inserted: {success_count}")
-            logger.info("=" * 50)
+            logger.info("STEP 5: Cleaning up stale products...")
+            deleted = self.cleanup_stale_products(unique_urls)
+            self.stats['deleted'] = deleted
+            
+            self.print_summary()
             
         except Exception as e:
             logger.error(f"Scraper failed: {e}")
@@ -192,7 +303,7 @@ class ParallelScraper:
 
 
 async def main():
-    scraper = ParallelScraper(max_concurrent=5)
+    scraper = SmartScraper(max_concurrent=5, batch_size=50)
     await scraper.run()
 
 
