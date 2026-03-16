@@ -97,9 +97,15 @@ class ProductScraper:
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=10))
     async def scrape_product(self, url: str, category_hint: str = "") -> Optional[Dict]:
         try:
-            await self.page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            response = await self.page.goto(url, wait_until="domcontentloaded", timeout=60000)
             
-            await self.page.wait_for_timeout(3000)
+            if response and response.status != 200:
+                logger.warning(f"Page returned status {response.status} for {url}")
+            
+            await self.page.wait_for_timeout(5000)
+            
+            await self.page.evaluate("window.scrollTo(0, 300)")
+            await self.page.wait_for_timeout(500)
             
             product_id = self._extract_product_id(url)
             
@@ -231,6 +237,9 @@ class ProductScraper:
             '.product-detail-image img',
             'figure.product-image img',
             '.product-hero-image img',
+            '.product-gallery img',
+            '.main-image img',
+            '.primary-image img',
         ]
         
         for selector in selectors:
@@ -248,6 +257,15 @@ class ProductScraper:
                         return data_lazy
             except Exception:
                 continue
+        
+        try:
+            all_imgs = await self.page.query_selector_all('img[src*="ftshp.digital"]')
+            for img in all_imgs[:3]:
+                src = await img.get_attribute('src')
+                if src and 'p/' in src and '.jpg' in src:
+                    return src
+        except Exception:
+            pass
         
         return ""
 
