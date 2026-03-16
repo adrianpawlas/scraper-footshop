@@ -49,7 +49,7 @@ class SigLIPEmbeddingGenerator:
             with torch.no_grad():
                 outputs = self.model.get_image_features(**inputs)
             
-            embedding = outputs.pooler_output.cpu().numpy().flatten().tolist()
+            embedding = outputs.cpu().numpy().flatten().tolist()
             
             return embedding
             
@@ -65,7 +65,7 @@ class SigLIPEmbeddingGenerator:
             with torch.no_grad():
                 outputs = self.model.get_text_features(**inputs)
             
-            embedding = outputs.pooler_output.cpu().numpy().flatten().tolist()
+            embedding = outputs.cpu().numpy().flatten().tolist()
             
             return embedding
             
